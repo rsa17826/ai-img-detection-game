@@ -393,14 +393,24 @@ def collides(x, y, w, h, face):
 
 
 known_labels: Any = []
+import tempfile
 
 
-@eel.expose
 def updateFacesList():
-  global mtcnn, known_norm, resnet, device, db, known_embeddings, known_labels
+  global mtcnn, known_norm, resnet, device, known_embeddings, known_labels
   try:
-    enroll_faces.init(log, eel.setProg)
-    db = np.load(DB_PATH)
+    # enroll_faces.init(log, eel.setProg)
+    log("started loading new file")
+    if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
+      os.rename(DB_PATH + ".backup", DB_PATH)
+    with tempfile.NamedTemporaryFile(delete=False) as temp_db:
+      log(temp_db.name)
+      f.write(temp_db.name, f.read(DB_PATH, "", True), True)
+      if os.path.exists(DB_PATH + ".backup"):
+        os.remove(DB_PATH + ".backup")
+      os.rename(DB_PATH, DB_PATH + ".backup")
+      db = np.load(temp_db.name) # Load from the temporary location
+
     known_embeddings = db["embeddings"] # shape (N,512)
     known_labels = db["labels"] # shape (N,)
     # load models
@@ -408,6 +418,7 @@ def updateFacesList():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     mtcnn = MTCNN(image_size=160, margin=20, keep_all=True, device=device)
     resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
+    log("done loading new file")
   except Exception as e:
     log(e)
   eel.hideProg()
