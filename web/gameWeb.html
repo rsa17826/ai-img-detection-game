@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>camera web ui</title>
+    <script type="text/javascript" src="/eel.js"></script>
+    <script type="text/javascript" src="./libloader.js"></script>
+    <script type="text/javascript" src="./allfuncs.js"></script>
+    <script type="text/javascript" src="./toast.js"></script>
+    <script type="text/javascript" src="./progressBar.js"></script>
+    <script type="text/javascript" src="./log.js"></script>
+    <script type="text/javascript">
+      const a = loadlib("allfuncs")
+      const BLANK_IMAGE =
+        "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+      ;(async () => {
+        await a.bodyload()
+        await a.waituntil(() => eel._websocket)
+        eel._websocket.onclose = window.close.bind(window)
+        eel.requestUpdatedData()
+        eel.expose(loadData)
+        eel.expose(hideProg)
+        eel.expose(setProg)
+        eel.expose(setHighscoreMessage)
+        function setHighscoreMessage(msg) {
+          a.qs("#highscoreMessage").textContent = msg
+        }
+        function setProg(prog, maxProg, name) {
+          if (!window.progBar) {
+            window.progBar = new (loadlib("progress bar"))(
+              prog,
+              maxProg
+            )
+          }
+          window.progBar.set(prog, name)
+        }
+        function hideProg() {
+          if (window.progBar) window.progBar.remove()
+          window.progBar = null
+        }
+        function loadData({ captureIdx, setminconfidenceInput }) {
+          a.qs("#captureIdx").value = captureIdx
+          a.qs("#setminconfidenceInput").value = setminconfidenceInput
+        }
+        window.toast = loadlib("toast")
+        a.listen("#captureIdx", "change", function (e) {
+          eel.startCapture(a.qs("#captureIdx").value)
+        })
+        a.listen("#captureBtn", "click", function (e) {
+          eel.startCapture(a.qs("#captureIdx").value)
+        })
+        a.listen("#stopCaptureBtn", "click", function (e) {
+          eel.stopCapture()
+        })
+        a.listen("#quitAppBtn", "click", function (e) {
+          eel.quitApp()
+          window.close()
+        })
+        a.listen(
+          "#setminconfidenceInput",
+          ["input", "change"],
+          function (e) {
+            eel.jsSetminconfidence(
+              a.qs("#setminconfidenceInput").value
+            )
+          }
+        )
+      })()
+      eel.expose(print)
+      function print(...msgs) {
+        console.log(...msgs)
+        console.log(msgs.join(" - "))
+        toast(msgs.join(" - "), "green")
+      }
+      eel.expose(receive_frame)
+      function receive_frame(encoded_frame) {
+        a.qs("#cameraFeed").src = encoded_frame
+      }
+    </script>
+  </head>
+  <style>
+    * {
+      color: white;
+    }
+    button,
+    input {
+      background-color: #777;
+      border: none;
+      margin: 4px;
+    }
+    .v {
+      display: flex;
+      flex-direction: column;
+    }
+    .h {
+      display: flex;
+      flex-direction: row;
+    }
+    .c {
+      align-items: center;
+      align-content: center;
+      align-self: center;
+    }
+    #cameraFeed {
+      --size: calc(100vh - 60px);
+      height: var(--size);
+      min-width: var(--size);
+      max-width: calc(100vw - 20px);
+      margin: 4px;
+      border: 10px solid black;
+      /* --size: calc(100vh - 140px);
+      max-height: var(--size);
+      max-width: calc(100vw - 20px);
+      margin: 4px;
+      border: 10px solid black; */
+    }
+    body,
+    html {
+      overflow: hidden;
+      background-color: #111;
+    }
+    #highscoreMessage {
+      position: absolute;
+      top: 10px;
+      left: 30px;
+      font-weight: bolder;
+      color: aqua;
+    }
+  </style>
+  <body>
+    <h2 id="highscoreMessage">none</h2>
+    <div class="v">
+      <div class="v c">
+        <div class="h">
+          <label for="captureIdx">Camera Index:</label>
+          <input
+            type="number"
+            name="captureIdx"
+            id="captureIdx"
+            value="1"
+          />
+          <button id="captureBtn">▶️ Start Capture</button>
+          <button id="stopCaptureBtn">🟥 Stop Capture</button>
+          <label for="setminconfidenceInput">Min Confidence:</label>
+          <input
+            type="number"
+            name="setminconfidenceInput"
+            id="setminconfidenceInput"
+            step="0.01"
+            value="0.5"
+          />
+        </div>
+      </div>
+      <div class="c">
+        <img
+          id="cameraFeed"
+          alt="Camera Feed"
+          src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+        />
+      </div>
+    </div>
+  </body>
+</html>

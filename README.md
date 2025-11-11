@@ -1,1 +1,0 @@
-# ai-img-detection-game

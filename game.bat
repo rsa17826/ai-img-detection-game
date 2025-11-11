@@ -1,0 +1,1 @@
+"./person-recognition/.venv/Scripts/python.exe" "./person-recognition/game.py"
