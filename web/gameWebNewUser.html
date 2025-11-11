@@ -16,10 +16,10 @@
         await a.bodyload()
         await a.waituntil(() => eel._websocket)
         eel._websocket.onclose = window.close.bind(window)
-        eel.requestUpdatedData()
         eel.expose(loadData)
         eel.expose(hideProg)
         eel.expose(setProg)
+        eel.updateHtmlData()
         function setProg(prog, maxProg, name) {
           if (!window.progBar) {
             window.progBar = new (loadlib("progress bar"))(
@@ -42,7 +42,7 @@
           // a.qs("#captureIdx").value = captureIdx
           // a.qs("#setminconfidenceInput").value = setminconfidenceInput
           // a.qs("#TARGET_CONFIDENCE").value = TARGET_CONFIDENCE
-          // a.qs("#enableAutoCapture").value = enableAutoCapture
+          a.qs("#enableAutoCapture").checked = enableAutoCapture
           // eel.updateFacesList()
         }
         window.toast = loadlib("toast")
@@ -50,9 +50,9 @@
           eel.startCapture(a.qs("#captureIdx").value)
           eel.updateFacesList()
         })
-        // a.listen("#enableAutoCapture", "change", function (e) {
-        //   eel.setenableAutoCapture(a.qs("#enableAutoCapture").checked)
-        // })
+        a.listen("#enableAutoCapture", "change", function (e) {
+          eel.setenableAutoCapture(a.qs("#enableAutoCapture").checked)
+        })
         // a.listen("#TARGET_CONFIDENCE", "change", function (e) {
         //   eel.setTARGET_THRESH(a.qs("#TARGET_CONFIDENCE").value)
         // })
@@ -70,15 +70,15 @@
         a.listen("#stopCaptureBtn", "click", function (e) {
           eel.stopCapture()
         })
-        a.listen(
-          "#setminconfidenceInput",
-          ["input", "change"],
-          function (e) {
-            eel.jsSetminconfidence(
-              a.qs("#setminconfidenceInput").value
-            )
-          }
-        )
+        // a.listen(
+        //   "#setminconfidenceInput",
+        //   ["input", "change"],
+        //   function (e) {
+        //     eel.jsSetminconfidence(
+        //       a.qs("#setminconfidenceInput").value
+        //     )
+        //   }
+        // )
       })()
       eel.expose(print)
       function print(...msgs) {
@@ -148,8 +148,7 @@
       color: rgb(226, 0, 0);
       --text-shadow-color: rgb(207, 126, 126);
       text-shadow: -1px 0 var(--text-shadow-color),
-        0 1px var(--text-shadow-color),
-        1px 0 var(--text-shadow-color),
+        0 1px var(--text-shadow-color), 1px 0 var(--text-shadow-color),
         0 -1px var(--text-shadow-color);
       z-index: 9999999999;
       padding: none;
@@ -165,8 +164,8 @@
         <br />
         (ONLY PRESS THIS IF YOU ARE THE PERSON THAT HAS THEIR FACE
         SELECTED BY THE RED BOX!)
-        <br />then move after it loads move around and it will auto
-        capture more images if required
+        <br />if you anrt being recognised well enough press the add
+        face to list button more
       </h2>
     </div>
     <div class="v">
@@ -178,7 +177,7 @@
             type="number"
             name="captureIdx"
             id="captureIdx"
-            value="1"
+            value="0"
           />
           <button id="captureBtn">▶️ Start Capture</button>
           <button id="stopCaptureBtn">🟥 Stop Capture</button>
@@ -206,13 +205,16 @@
             min="-1"
             max="1"
           />
+        -->
+        <div class="h">
           <label for="enableAutoCapture">Enable Auto Capture:</label>
           <input
             title="if enabled Target Confidence is used"
             type="checkbox"
             name="enableAutoCapture"
             id="enableAutoCapture"
-          /> -->
+          />
+        </div>
         <!-- </div> -->
         <div class="h">
           <button id="updateFacesList">update faces list</button>

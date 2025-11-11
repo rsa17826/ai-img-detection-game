@@ -135,7 +135,7 @@ def init(log, setProg=lambda *a: 1):
       prog += 1
       setProg(prog, maxProg, person_name)
 
-      # Check if the person is already enrolled
+      # Check if the person is already players
       if cache.has(person_name + "/" + img_file):
         # log(
         #   f"[INFO] Skipping already processed image for: {person_name} ({img_file})"
@@ -182,7 +182,7 @@ def init(log, setProg=lambda *a: 1):
   os.makedirs("data", exist_ok=True)
   np.savez(DB_PATH, embeddings=all_embeddings, labels=all_labels)
 
-  # Log total faces enrolled
-  log(f"[INFO] Total faces enrolled: {len(all_labels)}")
+  # Log total faces players
+  log(f"[INFO] Total faces players: {len(all_labels)}")
   log(f"[INFO] Saved database to {DB_PATH}")
   cache.saveToFile()

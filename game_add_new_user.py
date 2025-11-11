@@ -66,9 +66,6 @@ class DecayingAverage:
 
 
 # region start
-print("changing dir to ", os.path.dirname(os.path.abspath(__file__)))
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
 
 # normalize known vectors for cosine sim
 def l2norm(x):
@@ -212,6 +209,7 @@ eel.init("web")
 cap: Any = 0
 MATCH_THRESHOLD = 0.65
 DB_PATH = "data/embeddings_db.npz"
+enableAutoCapture = False
 TARGET_CONFIDENCE = 0.7
 mtcnn: Any = None
 # Flag to determine whether to save the current frame
@@ -244,13 +242,17 @@ def jsSaveFrame():
 
 # Expose function to request updated settings/data to be sent to JavaScript
 @eel.expose
-def requestUpdatedData():
+def updateHtmlData():
   # Send current configuration to the front end
-  eel.loadData(
-    {
-      "captureIdx": capidx,
-    }
-  )
+  eel.loadData({"captureIdx": capidx, "enableAutoCapture": enableAutoCapture})
+
+
+# Expose JavaScript function to set minimum confidence level for detection
+@eel.expose
+def setenableAutoCapture(val):
+  global enableAutoCapture
+  enableAutoCapture = float(val) # Update minimum confidence with the new value
+  log("enableAutoCapture set to " + str(val))
 
 
 # Expose a function to start capturing video from the specified camera
@@ -425,7 +427,9 @@ def comstr(item: Any) -> str:
 @eel.expose
 def addFaceToList(val):
   global faceName
-  faceName = val # Update minimum confidence with the new value
+  faceName = val
+  enableAutoCapture=True
+  updateHtmlData()
   log("faceName set to " + val)
 
 
@@ -499,8 +503,17 @@ while True:
         # endregion
         # region capture face
         if (
+          faceName
+          and foundUnknownFace
+          and not name
+          and faceName not in known_labels
+        ):
+          enableAutoCapture = True
+          updateHtmlData()
+        if (
           (
-            name
+            enableAutoCapture
+            and name
             and score
             and score < TARGET_CONFIDENCE
             and score > MATCH_THRESHOLD
@@ -517,11 +530,11 @@ while True:
           if not name:
             name = faceName
           i = 0
-          path = f"./enrolled/{name}/{i}.png"
-          os.makedirs(f"./enrolled/{name}", exist_ok=True)
+          path = f"./players/{name}/{i}.png"
+          os.makedirs(f"./players/{name}", exist_ok=True)
           while os.path.exists(path):
             i += 1
-            path = f"./enrolled/{name}/{i}.png"
+            path = f"./players/{name}/{i}.png"
           log("adding image for ", name, "idx: ", i)
           if facePos:
             frame_rgb_cropped = rawframe_bgr[
@@ -545,7 +558,6 @@ while True:
           if name not in avgs:
             avgs[name] = RecentAverage()
           avgs[name].registerValue(score)
-          print(avgs[name].getAverage(), name)
         if foundUnknownFace:
           break
         if len(avgs[name].values) < 10:
@@ -572,6 +584,8 @@ while True:
             + " - CURRENT: "
             + toPlaces(score, 1, 2)
           )
+          enableAutoCapture = False
+        updateHtmlData()
         textSize = 0.55
         cv2.putText(
           frame,
