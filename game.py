@@ -437,7 +437,7 @@ def say(msg):
     engine.stop()
 
   log(msg)
-  # Thread(target=_say).start()
+  Thread(target=_say).start()
 
 
 # endregion
