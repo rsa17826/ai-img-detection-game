@@ -1,1 +1,1 @@
-"./person-recognition/.venv/Scripts/python.exe" "./person-recognition/game.py"
+"./.venv/Scripts/python.exe" "./game.py"
