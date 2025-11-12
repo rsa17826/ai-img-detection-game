@@ -399,8 +399,7 @@ os.makedirs("data", exist_ok=True)
 def updateFacesList():
   global mtcnn, known_norm, resnet, device, known_embeddings, known_labels
   try:
-    # enroll_faces.init(log, eel.setProg)
-    enroll_faces.init(log, eel.updateProg)
+    enroll_faces.init(log, eel.setProg)
     log("started loading new file")
     if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
       os.rename(DB_PATH + ".backup", DB_PATH)
