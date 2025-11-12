@@ -571,31 +571,32 @@ while True:
           avgs[name].registerValue(score)
         if foundUnknownFace:
           break
-        if len(avgs[name].values) < 10:
-          color = (0, 0, 255)
-          label_text += (
-            " move your face around and show different angles "
-            + str(len(avgs[name].values))
-            + "/10"
-          )
-        elif avgs[name].getAverage() < 0.8:
-          color = (0, 0, 255)
-          label_text += (
-            " get avg > .8 AVG: "
-            + toPlaces(avgs[name].getAverage(), 1, 2)
-            + " - CURRENT: "
-            + toPlaces(score, 1, 2)
-          )
-        else:
-          color = (0, 255, 0)
-          label_text += (
-            " ready to play ~"
-            + toPlaces(avgs[name].getAverage() * 100, 3, 0)
-            + "% detection rate"
-            + " - CURRENT: "
-            + toPlaces(score, 1, 2)
-          )
-          enableAutoCapture = False
+        if name:
+          if len(avgs[name].values) < 10:
+            color = (0, 0, 255)
+            label_text += (
+              " move your face around and show different angles "
+              + str(len(avgs[name].values))
+              + "/10"
+            )
+          elif avgs[name].getAverage() < 0.8:
+            color = (0, 0, 255)
+            label_text += (
+              " get avg > .8 AVG: "
+              + toPlaces(avgs[name].getAverage(), 1, 2)
+              + " - CURRENT: "
+              + toPlaces(score, 1, 2)
+            )
+          else:
+            color = (0, 255, 0)
+            label_text += (
+              " ready to play ~"
+              + toPlaces(avgs[name].getAverage() * 100, 3, 0)
+              + "% detection rate"
+              + " - CURRENT: "
+              + toPlaces(score, 1, 2)
+            )
+            enableAutoCapture = False
         updateHtmlData()
         textSize = 0.55
         cv2.putText(
