@@ -250,9 +250,3 @@ def loadData(d: str, progress=None) -> Any:
     # _stack.append([remainingData, _stack])
 
   # return _stack[len(_stack) - 1]
-
-
-d: Any = {"asd": 21221, "asdas": [[], {}, [], [21312, {111: 222}]]}
-saveDataToFile("./a.sds", d)
-print((loadDataFromFile("./a.sds"), d))
-print("\n\n\n\r\n\r\n")
