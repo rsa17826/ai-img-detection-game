@@ -11,8 +11,9 @@ cd ./ai-img-detection-game
 pip install uv
 
 uv venv -p 3.9.13
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-pip install face_recognition facenet-pytorch opencv-python flask pandas numpy eel
+.venv\Scripts\activate
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+uv pip install face_recognition facenet-pytorch opencv-python flask pandas numpy eel
 
 ```
 
