@@ -254,7 +254,7 @@ def setenableAutoCapture(val):
   enableAutoCapture = float(val) # Update minimum confidence with the new value
   log("enableAutoCapture set to " + str(val))
 
-def gstreamer_pipeline(sensor_id=0, width=1280, height=720, framerate=60, flip_method=0):
+def gstreamer_pipeline(sensor_id=0, width=640, height=480, framerate=30, flip_method=0):
     return (
         f"nvarguscamerasrc sensor-id={sensor_id} ! "
         f"video/x-raw(memory:NVMM), width={width}, height={height}, framerate={framerate}/1 ! "
@@ -535,9 +535,9 @@ while True:
         small_frame = cv2.resize(frame_rgb, (320, 180)) 
         boxes, probs = mtcnn.detect(small_frame)
         
-        # Scale boxes back to 1280x720
+        # Scale boxes back to 640x480
         if boxes is not None:
-            boxes = boxes * [1280/320, 720/180, 1280/320, 720/180]
+            boxes = boxes * [640/320, 480/180, 640/320, 480/180]
     # boxes, probs = mtcnn.detect(frame_rgb)
     if boxes is not None:
       for box, prob in zip(boxes, probs):

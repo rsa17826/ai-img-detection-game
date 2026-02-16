@@ -11,3 +11,9 @@ kwriteconfig6 --file kglobalshortcutsrc --group kwin --key "Switch One Desktop D
 
 # Reload the shortcut daemon to apply changes
 kquitapp6 kglobalaccel && sleep 2s && kglobalaccel6 &
+
+sudo systemctl stop nvargus-daemon
+sudo systemctl disable nvargus-daemon
+
+sudo systemctl enable nvargus-daemon
+sudo systemctl start nvargus-daemon
