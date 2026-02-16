@@ -313,28 +313,6 @@ def startCapture(idx):
     log(f"camera with index {idx} was successfully opened") # Log success
 
 
-def get_embedding(face_img_rgb):
-  """
-  face_img_rgb: np array (H,W,3) RGB cropped face region
-  returns: (512,) embedding or None if detection failed
-  """
-  # detect/align just this face via mtcnn on the crop
-  face_tensor = mtcnn(face_img_rgb)
-
-  if face_tensor is None:
-    return None
-
-  # Convert to proper shape
-  face_tensor = face_tensor.squeeze(0).to(device) # Remove the batch dimension
-
-  with torch.no_grad():
-    emb = resnet(
-      face_tensor.unsqueeze(0)
-    ) # Add the batch dimension back for processing
-  emb = emb.squeeze(0).cpu().numpy()
-  return emb
-
-
 def match_identity(embedding_vec):
   """
   Compare embedding_vec (512,) to known embeddings via cosine similarity.
@@ -351,17 +329,29 @@ def match_identity(embedding_vec):
     return best_name, float(best_score)
   else:
     return None, None
+import queue
+frame_queue = queue.Queue(maxsize=1)
 
+def worker():
+    while True:
+        frame = frame_queue.get() # Wait for a frame
+        if frame is None: break
+        
+        try:
+            # All the heavy lifting happens here, outside the main loop
+            small_frame = cv2.resize(frame, (480, 360)) # Lower res = Much faster
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
+            _, buffer = cv2.imencode(".jpg", small_frame, encode_param)
+            
+            encoded_frame = base64.b64encode(buffer).decode("utf-8")
+            eel.receive_frame("data:image/jpeg;base64," + encoded_frame)
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            frame_queue.task_done()
 
-# Function to send the current video frame to the front end
-def send_frame(frame):
-  # Convert the frame to a format suitable for web
-  _, buffer = cv2.imencode(".jpg", frame) # Encode frame as JPEG
-  frame_bytes = buffer.tobytes() # Get bytes from the buffer
-  encoded_frame = base64.b64encode(frame_bytes).decode("utf-8") # Base64 encode
-  # Send the encoded frame to the JavaScript frontend
-  eel.receive_frame("data:image/jpeg;base64," + encoded_frame)
-
+# 2. Start the worker thread ONCE at the start of your app
+Thread(target=worker, daemon=True).start()
 
 # Function to send a blank frame to avoid blank display
 def sendBlankFrame():
@@ -552,9 +542,6 @@ def get_embeddings_batched(face_crops):
         embs = resnet(batch)
     
     return embs.cpu().numpy()
-
-# --- Inside your While True loop ---
-
 
 # endregion
 highScoreOwner = f.read("./highScorename.txt", "")
@@ -871,4 +858,8 @@ while True:
       del lastActiveTimes[name]
       say(name + " has left the game")
 
-  send_frame(frame)
+  # if frame_queue.full():
+  #   try:
+  #     frame_queue.get_nowait()
+  #   except queue.Empty: pass
+  frame_queue.put(frame)
