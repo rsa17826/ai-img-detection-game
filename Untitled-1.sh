@@ -14,6 +14,6 @@ kquitapp6 kglobalaccel && sleep 2s && kglobalaccel6 &
 
 sudo systemctl stop nvargus-daemon
 sudo systemctl disable nvargus-daemon
-
+sudo rm /tmp/argus_socket
 sudo systemctl enable nvargus-daemon
 sudo systemctl start nvargus-daemon
