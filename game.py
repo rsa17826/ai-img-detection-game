@@ -18,6 +18,11 @@ class HaltonRNG:
         self.index += 1
         return result
 
+class JitteredHaltonRNG(HaltonRNG):
+    def next(self):
+        base_value = super().next()
+        jitter = (random.random() - 0.5) * 0.05  # small noise
+        return max(0.0, min(1.0, base_value + jitter))
 
 print("changing dir to ", os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -281,8 +286,14 @@ def requestUpdatedData():
     {
       "captureIdx": capidx,
       "setminconfidenceInput": MATCH_THRESHOLD,
+      "gameSpeed": gameSpeed,
     }
   )
+@eel.expose
+def setGameSpeed(v):
+  global gameSpeed
+  gameSpeed=v
+gameSpeed=1
 
 
 def gstreamer_pipeline(sensor_id=0, width=640, height=480, framerate=30, flip_method=0):
@@ -438,7 +449,7 @@ def reset():
   deathBoxList = []
   speed = 3
   gameScore = 0
-  deathPosRand = HaltonRNG()
+  deathPosRand = JitteredHaltonRNG()
   # spawnNewDeathRand = BalancedRand(0, 1, 0.1, 0.5)
   dirRand = BalancedRand(0, 3, 0.1, 0.5)
   stopped = False
@@ -687,7 +698,7 @@ while True:
 
     # B. GAME LOGIC: Always runs, using 'last_detected_faces'
     # Update Red Death Boxes
-    spawnCount += 0.1 # Adjust spawn rate as needed
+    spawnCount += 0.1*gameSpeed # Adjust spawn rate as needed
     while spawnCount > 1:
       spawnCount -= 1
       diridx = int(round(dirRand.next()))
@@ -719,8 +730,8 @@ while True:
     
     # Update positions and Draw Death Boxes
     for db in deathBoxList:
-        db[0] += db[4][0] * db[5] # x += dir_x * speed
-        db[1] += db[4][1] * db[5] # y += dir_y * speed
+        db[0] += db[4][0] * db[5]*gameSpeed # x += dir_x * speed
+        db[1] += db[4][1] * db[5]*gameSpeed # y += dir_y * speed
         cv2.rectangle(frame, (int(db[0]), int(db[1])), (int(db[0]+db[2]), int(db[1]+db[3])), (0, 0, 255), 2)
     # C. COLLISION & SCORING: Process every face currently tracked
     for face in last_detected_faces:
@@ -778,7 +789,15 @@ while True:
                   graze = 0.3
 
             if not collision:
-                gameScores[name] = gameScores.get(name, 0) + ((y2 / 3) * delta)
+                gameScores[name] = gameScores.get(name, 0) + ((y2 / 3) * delta) * (graze + 1)
+            color = (0, 255, 0)
+            if collision:
+              color = (0, 0, 255)
+            elif graze == 0.3:
+              color = (0, 192, 255)
+            elif graze == 2:
+              color = (0, 128, 255)
+
             textSize = 0.6
             hasHighScore = name == highScoreOwner
             gettingHighScore = hasHighScore and gameScores[name] >= highScore
@@ -845,7 +864,6 @@ while True:
             # endregion
 
             # D. DRAWING: Render UI on the frame
-            color = (0, 0, 255) if collision else (0, 255, 0)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, f"{name}: {toPlaces(score, 1, 2)}", (x1, y1-10), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
@@ -895,7 +913,7 @@ while True:
     )
 
     # Push to queue for the Eel worker to pick up
-    if frame_queue.full():
-        try: frame_queue.get_nowait()
-        except: pass
+    # if frame_queue.full():
+    #     try: frame_queue.get_nowait()
+    #     except: pass
     frame_queue.put(frame)
