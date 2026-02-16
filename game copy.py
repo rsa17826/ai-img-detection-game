@@ -1,23 +1,5 @@
 # region imports
 import os
-class HaltonRNG:
-    def __init__(self):
-        self.index = 1
-
-    def next(self):
-        result = 0
-        f = 1
-        i = self.index
-        base = 2
-
-        while i > 0:
-            f = f / base
-            result += f * (i % base)
-            i //= base
-
-        self.index += 1
-        return result
-
 
 print("changing dir to ", os.path.dirname(os.path.abspath(__file__)))
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -438,7 +420,7 @@ def reset():
   deathBoxList = []
   speed = 3
   gameScore = 0
-  deathPosRand = HaltonRNG()
+  deathPosRand = BalancedRand()
   # spawnNewDeathRand = BalancedRand(0, 1, 0.1, 0.5)
   dirRand = BalancedRand(0, 3, 0.1, 0.5)
   stopped = False
@@ -599,186 +581,217 @@ gameScores: Any = {}
 shouldSayNewHighScores: Any = {}
 spawnCount = 0.0
 lastActiveTimes: Any = {}
-import threading
-import queue
-
-# Global State for Async AI
-last_detected_faces = []
-ai_is_busy = False
-frame_queue = queue.Queue(maxsize=1)
-
-# --- 1. THE WORKER: Encodes and sends to Eel ---
-def eel_worker():
-    while True:
-        frame = frame_queue.get()
-        if frame is None: break
-        try:
-            # Send at a fixed low-res for the web UI
-            send_small = cv2.resize(frame, (640, 480))
-            _, buffer = cv2.imencode(".jpg", send_small, [cv2.IMWRITE_JPEG_QUALITY, 35])
-            encoded = base64.b64encode(buffer).decode("utf-8")
-            eel.receive_frame("data:image/jpeg;base64," + encoded)
-        except Exception as e:
-            print(f"Eel Worker Error: {e}")
-        finally:
-            frame_queue.task_done()
-
-threading.Thread(target=eel_worker, daemon=True).start()
-
-# --- 2. THE AI WORKER: Processes embeddings without blocking the game ---
-def run_ai_inference(frame_rgb_small, scale_w, scale_h):
-    global last_detected_faces, ai_is_busy
-    try:
-        boxes, probs = mtcnn.detect(frame_rgb_small)
-        results = []
-        if boxes is not None:
-            face_crops = []
-            valid_boxes = []
-            for box, prob in zip(boxes, probs):
-                if prob is None or prob < 0.9: continue
-                # Scale coordinates back to original frame size
-                x1, y1, x2, y2 = [int(box[0] * scale_w), int(box[1] * scale_h), 
-                                  int(box[2] * scale_w), int(box[3] * scale_h)]
-                
-                # Clip coordinates to avoid array errors
-                crop = frame_rgb_small[max(0, int(box[1])):int(box[3]), max(0, int(box[0])):int(box[2])]
-                if crop.size > 0:
-                    face_crops.append(crop)
-                    valid_boxes.append((x1, y1, x2, y2))
-
-            if face_crops:
-                embeddings = get_embeddings_batched(face_crops)
-                for i, emb in enumerate(embeddings):
-                    name, score = match_identity(emb)
-                    results.append({"name": name, "score": score, "box": valid_boxes[i]})
-        
-        last_detected_faces = results
-    finally:
-        ai_is_busy = False
-
-# --- 3. THE MAIN LOOP: Runs at max FPS ---
 while True:
-    if not cap or not cap.isOpened():
-        sendBlankFrame()
-        continue
+  ret, frame = cap.read()
+  if not ret: continue
+  
+  frame = cv2.flip(frame, 0)
+  frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+  
+  # --- AI TRIGGER (Non-blocking) ---
+  if not ai_is_busy:
+    ai_is_busy = True
+    # Send a SMALLER version to the AI to speed up detection significantly
+    small_rgb = cv2.resize(frame_rgb, (320, 240)) 
+    threading.Thread(target=run_ai_inference, args=(small_rgb,), daemon=True).start()
 
-    curr_time = time.time()
-    delta = curr_time - prev_time
-    fps = 1 / max(delta, 0.0001)
-    prev_time = curr_time
-
-    ret, frame = cap.read()
-    if not ret: continue
-
-    frame = cv2.flip(frame, 0)
-    height, width = frame.shape[:2]
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-    # A. ASYNC AI TRIGGER: Only run if AI thread is free
-    if not ai_is_busy:
-        ai_is_busy = True
-        # Speed hack: Detect on a tiny image
-        ai_w, ai_h = 320, 240
-        small_for_ai = cv2.resize(frame_rgb, (ai_w, ai_h))
-        run_ai_inference(small_for_ai, width/ai_w, height/ai_h)
-        # threading.Thread(target=run_ai_inference, 
-        #                  args=(small_for_ai, width/ai_w, height/ai_h), 
-        #                  daemon=True).start()
-
-    # B. GAME LOGIC: Always runs, using 'last_detected_faces'
-    # Update Red Death Boxes
-    spawnCount += 0.1 # Adjust spawn rate as needed
-    while spawnCount > 1:
-      spawnCount -= 1
-      diridx = int(round(dirRand.next()))
-      dir = [[0, 1], [0, -1], [1, 0], [-1, 0]][diridx]
-      deathBox = [
-        0,
-        0,
-        int(size),
-        int(size),
-        dir,
-        speed,
-      ]
-      if diridx == 0:
-        deathBox[1] = 0
-        deathBox[0] = int(deathPosRand.next()*height)
-      elif diridx == 1:
-        deathBox[1] = height - size
-        deathBox[0] = int(deathPosRand.next()*width)
-      elif diridx == 2:
-        deathBox[0] = 0
-        deathBox[1] = int(deathPosRand.next()*height)
-      elif diridx == 3:
-        deathBox[0] = width - size
-        deathBox[1] = int(deathPosRand.next()*width)
-      s = deathBox[4]
-      s[0] *= deathBox[5]
-      s[1] *= deathBox[5]
-      deathBoxList.append(deathBox)
+  # --- GAME LOGIC (Always runs at max speed) ---
+  # Use 'last_detected_faces' to handle collisions and scores
+  for face in last_detected_faces:
+    name = face["name"]
+    # Note: If you resized for AI, remember to scale box coordinates back up!
+    # scale_x = width / 320; scale_y = height / 240
+    x1, y1, x2, y2 = face["box"]
+  # endregion
+  # region grab frame
+  frame = cv2.flip(frame, 0) # Flip the frame for a mirror effect
+  frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+  # endregion
+  facePos = None
+  height, width = frame.shape[:2]
+  cv2.putText(
+    frame,
+    "FPS: " + toPlaces(fps, 2, 3),
+    (20, 50),
+    cv2.FONT_HERSHEY_SIMPLEX,
+    1,
+    (255, 255, 255),
+    2,
+  )
+  eel.setHighscoreMessage( # type: ignore
+    "HIGH SCORE: " + comstr(int(highScore)) + " by " + highScoreOwner,
+  )
+  # region spawn boxes
+  deathPosRand.maxNum = width
+  spawnCount += 0.1
+  while spawnCount > 1:
+    spawnCount -= 1
+    randPos = int(deathPosRand.next())
+    diridx = int(round(dirRand.next()))
+    dir = [[0, 1], [0, -1], [1, 0], [-1, 0]][diridx]
+    deathBox = [
+      0,
+      0,
+      int(size),
+      int(size),
+      dir,
+      speed,
+    ]
+    if diridx == 0:
+      deathBox[1] = 0
+      deathBox[0] = randPos
+    elif diridx == 1:
+      deathBox[1] = height - size
+      deathBox[0] = randPos
+    elif diridx == 2:
+      deathBox[0] = 0
+      deathBox[1] = randPos
+    elif diridx == 3:
+      deathBox[0] = width - size
+      deathBox[1] = randPos
+    s = deathBox[4]
+    s[0] *= deathBox[5]
+    s[1] *= deathBox[5]
+    deathBoxList.append(deathBox)
+  for deathBox in deathBoxList:
+    s = deathBox[4]
+    deathBox[0] += s[0]
+    deathBox[1] += s[1]
+    x, y, w, h, dir, speed = deathBox
+    x = int(x)
+    y = int(y)
+    w = int(w)
+    h = int(h)
+    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+    cv2.line(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+    cv2.line(frame, (x + w, y), (x, y + h), (0, 0, 255), 2)
+  deathBoxList = [
+    deathBox
+    for deathBox in deathBoxList
+    if (
+      not (
+        deathBox[1] > height # down
+        or deathBox[1] + deathBox[2] < 0 # up
+        or deathBox[0] > width # right
+        or deathBox[0] + deathBox[3] < 0
+      )
+    )
+  ]
+  # endregion
+  if mtcnn:
+    # 1. Detect all faces at once
+    boxes, probs = mtcnn.detect(frame_rgb)
     
-    # Update positions and Draw Death Boxes
-    for db in deathBoxList:
-        db[0] += db[4][0] * db[5] # x += dir_x * speed
-        db[1] += db[4][1] * db[5] # y += dir_y * speed
-        cv2.rectangle(frame, (int(db[0]), int(db[1])), (int(db[0]+db[2]), int(db[1]+db[3])), (0, 0, 255), 2)
-    # C. COLLISION & SCORING: Process every face currently tracked
-    for face in last_detected_faces:
-        name = face["name"]
-        score = face["score"]
-        x1, y1, x2, y2 = face["box"]
-        
-        if name:
-            lastActiveTimes[name] = curr_time
-            collision = False
-            graze = 0
-            grazeSize = 5
-            
-            # Check collision against deathBoxList
-            for x, y, w, h, dir, speed in deathBoxList:
-                x = int(x)
-                y = int(y)
-                w = int(w)
-                h = int(h)
-                facePos = (x1, y1, x2, y2)
-                if collides(x, y, w, h, facePos):
-                  if (
-                    (
-                      name not in shouldSayNewHighScores
-                      or not shouldSayNewHighScores[name]
-                    )
-                    and highScoreOwner == name
-                    and name in gameScores
-                    and highScore == gameScores[name]
-                  ):
-                    say(
-                      name
-                      + " just lost with a new highscore of "
-                      + str(int(highScore))
-                    )
-                  gameScores[name] = 0
-                  shouldSayNewHighScores[name] = True
-                  collision = True
-                  break
-                elif collides(
-                  x - grazeSize,
-                  y - grazeSize,
-                  w + (grazeSize - 2),
-                  h + (grazeSize * 2),
-                  facePos,
-                ):
-                  graze = 2
-                elif collides(
-                  x - (grazeSize * 2),
-                  y - (grazeSize * 2),
-                  w + (grazeSize * 4),
-                  h + (grazeSize * 4),
-                  facePos,
-                ):
-                  graze = 0.3
+    if boxes is not None:
+      face_crops = []
+      valid_boxes = []
+      
+      # 2. Extract crops without re-running MTCNN
+      for box, prob in zip(boxes, probs):
+        if prob is None or prob < 0.9: continue # Filter low confidence
+        x1, y1, x2, y2 = [max(0, int(v)) for v in box]
+        crop = frame_rgb[y1:y2, x1:x2]
+        if crop.size > 0:
+          face_crops.append(crop)
+          valid_boxes.append((x1, y1, x2, y2))
 
+      # 3. Get all embeddings in ONE batch
+      if face_crops:
+        all_embs = get_embeddings_batched(face_crops)
+        
+        # 4. Match identities
+        for i, emb in enumerate(all_embs):
+          try:
+            name, score = match_identity(emb)
+          except Exception as e:
+            log(e)
+            continue
+          x1, y1, x2, y2 = valid_boxes[i]
+          # endregion
+          if name:
+            if name not in lastActiveTimes:
+              say(name + " just started the game")
+            lastActiveTimes[name] = curr_time
+            label_text = f"{name} ({score:.2f})"
+            color = (0, 255, 0) # green
+            facePos = [x1, y1, x2, y2]
+            collision = False
+            graze: float = 0
+            grazeSize = 5
+            # region check collisions
+            for x, y, w, h, dir, speed in deathBoxList:
+              x = int(x)
+              y = int(y)
+              w = int(w)
+              h = int(h)
+              if collides(x, y, w, h, facePos):
+                if (
+                  (
+                    name not in shouldSayNewHighScores
+                    or not shouldSayNewHighScores[name]
+                  )
+                  and highScoreOwner == name
+                  and name in gameScores
+                  and highScore == gameScores[name]
+                ):
+                  say(
+                    name
+                    + " just lost with a new highscore of "
+                    + str(int(highScore))
+                  )
+                gameScores[name] = 0
+                shouldSayNewHighScores[name] = True
+                collision = True
+                break
+              elif collides(
+                x - grazeSize,
+                y - grazeSize,
+                w + (grazeSize - 2),
+                h + (grazeSize * 2),
+                facePos,
+              ):
+                graze = 2
+              elif collides(
+                x - (grazeSize * 2),
+                y - (grazeSize * 2),
+                w + (grazeSize * 4),
+                h + (grazeSize * 4),
+                facePos,
+              ):
+                graze = 0.3
+            # endregion
+            # region calc new score
             if not collision:
-                gameScores[name] = gameScores.get(name, 0) + ((y2 / 3) * delta)
+              if name not in gameScores:
+                gameScores[name] = 0
+              gameScores[name] += ((facePos[3] / 3) * delta) * (graze + 1)
+            # endregion
+            # region draw face box
+            color = (0, 255, 0)
+            if collision:
+              color = (0, 0, 255)
+            elif graze == 0.3:
+              color = (0, 192, 255)
+            elif graze == 2:
+              color = (0, 128, 255)
+            cv2.rectangle(
+              frame,
+              (x1, y1),
+              (x2, y2),
+              color,
+              2,
+            )
+            cv2.putText(
+              frame,
+              name + ": " + toPlaces(score, 1, 2),
+              (x1, y1 - 10),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              0.6,
+              color,
+              2,
+            )
+            # endregion
+            # region render score text
             textSize = 0.6
             hasHighScore = name == highScoreOwner
             gettingHighScore = hasHighScore and gameScores[name] >= highScore
@@ -843,59 +856,41 @@ while True:
               cv2.LINE_AA,
             )
             # endregion
-
-            # D. DRAWING: Render UI on the frame
-            color = (0, 0, 255) if collision else (0, 255, 0)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{name}: {toPlaces(score, 1, 2)}", (x1, y1-10), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
-            # region update scores and highscores
-            for scorereName, gameScore in gameScores.items():
-              if int(gameScore) > highScore:
-                highScore = gameScore
-                if highScoreOwner:
-                  if scorereName != highScoreOwner:
+          # region update scores and highscores
+          for scorereName, gameScore in gameScores.items():
+            if int(gameScore) > highScore:
+              highScore = gameScore
+              if highScoreOwner:
+                if scorereName != highScoreOwner:
+                  say(
+                    scorereName
+                    + " overtook "
+                    + highScoreOwner
+                    + " with a score of "
+                    + str(int(gameScore))
+                  )
+                else:
+                  if (
+                    scorereName in shouldSayNewHighScores
+                    and shouldSayNewHighScores[scorereName]
+                  ):
                     say(
                       scorereName
-                      + " overtook "
-                      + highScoreOwner
-                      + " with a score of "
+                      + " got a new high score of "
                       + str(int(gameScore))
                     )
-                  else:
-                    if (
-                      scorereName in shouldSayNewHighScores
-                      and shouldSayNewHighScores[scorereName]
-                    ):
-                      say(
-                        scorereName
-                        + " got a new high score of "
-                        + str(int(gameScore))
-                      )
-                      shouldSayNewHighScores[scorereName] = False
-                highScoreOwner = str(scorereName)
-                f.write("./highScore.txt", str(int(gameScore)))
-                f.write("./highScorename.txt", str(scorereName))
-          # endregion
+                    shouldSayNewHighScores[scorereName] = False
+              highScoreOwner = str(scorereName)
+              f.write("./highScore.txt", str(int(gameScore)))
+              f.write("./highScorename.txt", str(scorereName))
+        # endregion
+  for name, t in lastActiveTimes.copy().items():
+    if curr_time - t > 1:
+      del lastActiveTimes[name]
+      say(name + " has left the game")
 
-    # E. CLEANUP & SEND
-    deathBoxList = [db for db in deathBoxList if 0 <= db[0] <= width and 0 <= db[1] <= height]
-      
-    cv2.putText(
-      frame,
-      "FPS: " + toPlaces(fps, 2, 3),
-      (20, 50),
-      cv2.FONT_HERSHEY_SIMPLEX,
-      1,
-      (255, 255, 255),
-      2,
-    )
-    eel.setHighscoreMessage( # type: ignore
-      "HIGH SCORE: " + comstr(int(highScore)) + " by " + highScoreOwner,
-    )
-
-    # Push to queue for the Eel worker to pick up
-    if frame_queue.full():
-        try: frame_queue.get_nowait()
-        except: pass
-    frame_queue.put(frame)
+  # if frame_queue.full():
+  #   try:
+  #     frame_queue.get_nowait()
+  #   except queue.Empty: pass
+  frame_queue.put(frame)
