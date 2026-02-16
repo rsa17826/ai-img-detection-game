@@ -1,0 +1,20 @@
+jetson-containers run --workdir /opt/nanoowl (autotag nanoowl)
+pip install aiohttp --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+export TRTEngineBuilderWorkspaceSize=1073741824  # 1 GB
+python3 -m nanoowl.build_image_encoder_engine \
+    data/owl_image_encoder_patch32.engine
+
+sed -i -E '/camera = cv2\.VideoCapture\(/c\
+        camera = cv2.VideoCapture("nvarguscamerasrc ! video/x-raw(memory:NVMM), width=1280, height=720, format=NV12, framerate=15/1 ! nvvidconv flip-method=6 ! video/x-raw, format=BGRx ! videoconvert ! appsink max-buffers=1 drop=true", cv2.CAP_GSTREAMER)' /opt/nanoowl/examples/tree_demo/tree_demo.py
+
+
+cd examples/tree_demo
+python3 tree_demo.py --camera 0 --resolution 640x480 \
+    ../../data/owl_image_encoder_patch32.engine
+
+nano /opt/nanoowl/examples/tree_demo/tree_demo.py
+
+http://<ip address>:7860
+
+[a face [nose][mouth][glasses[eye][eye]]][lights][window][wall]

@@ -254,15 +254,50 @@ def setenableAutoCapture(val):
   enableAutoCapture = float(val) # Update minimum confidence with the new value
   log("enableAutoCapture set to " + str(val))
 
+def gstreamer_pipeline(sensor_id=0, width=1280, height=720, framerate=60, flip_method=0):
+    return (
+        f"nvarguscamerasrc sensor-id={sensor_id} ! "
+        f"video/x-raw(memory:NVMM), width={width}, height={height}, framerate={framerate}/1 ! "
+        f"nvvidconv flip-method={flip_method} ! "
+        f"video/x-raw, width={width}, height={height}, format=BGRx ! "
+        f"videoconvert ! "
+        f"video/x-raw, format=BGR ! "
+        f"queue max-size-buffers=1 ! "
+        f"appsink drop=True"
+    )
+
+    
+# # Initialize
+# pipeline = gstreamer_pipeline(sensor_id=0, framerate=60)
+# cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+# if not cap.isOpened():
+#     print("Cannot open pipeline. Check your CSI connection or sensor_id.")
+# else:
+#     try:
+#         ret, frame = cap.read()
+#         if ret:
+#             print(f"Success! Frame Shape: {frame.shape}")
+#         else:
+#             print("Pipeline opened, but no frame received (check camera hardware).")
+#     finally:
+#         cap.release()
 
 # Expose a function to start capturing video from the specified camera
 @eel.expose
 def startCapture(idx):
   global cap, capidx
-  idx = int(idx) # Convert the input index to an integer
   log(f"Attempting to start capture on camera index: {idx}")
-  capidx = idx # Set the camera index to the global variable
-  cap = cv2.VideoCapture(idx) # Initialize the VideoCapture object
+  # cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=0), cv2.CAP_GSTREAMER)
+  pipeline = gstreamer_pipeline(sensor_id=0, framerate=30)
+  cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+  
+
+  #idx = int(idx) # Convert the input index to an integer
+
+  #capidx = idx # Set the camera index to the global variable
+  #cap = cv2.VideoCapture(idx) # Initialize the VideoCapture object
   if not cap.isOpened():
     log(
       f"Failed to open camera with index {idx}. Please check the index and try again."
@@ -336,7 +371,7 @@ Thread(
   )
 ).start()
 
-os.system("start http://127.0.0.1:15675/gameWebNewUser.html")
+os.system("xdg-open http://127.0.0.1:15675/gameWebNewUser.html")
 
 
 # Function to format numbers into a specific format
@@ -396,27 +431,40 @@ known_labels: Any = []
 import tempfile
 os.makedirs("data", exist_ok=True)
 
+@eel.expose
 def updateFacesList():
   global mtcnn, known_norm, resnet, device, known_embeddings, known_labels
   try:
     enroll_faces.init(log, eel.setProg)
     log("started loading new file")
-    if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
-      os.rename(DB_PATH + ".backup", DB_PATH)
-    with tempfile.NamedTemporaryFile(delete=False) as temp_db:
-      log(temp_db.name)
-      f.write(temp_db.name, f.read(DB_PATH, "", True), True)
-      if os.path.exists(DB_PATH + ".backup"):
-        os.remove(DB_PATH + ".backup")
-      os.rename(DB_PATH, DB_PATH + ".backup")
-      db = np.load(temp_db.name) # Load from the temporary location
+    # if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
+    #   os.rename(DB_PATH + ".backup", DB_PATH)
+    # with tempfile.NamedTemporaryFile(delete=False) as temp_db:
+    #   log(temp_db.name)
+    #   # f.write(temp_db.name, f.read(DB_PATH, "", True), True)
+    #   # if os.path.exists(DB_PATH + ".backup"):
+    #   #   os.remove(DB_PATH + ".backup")
+    #   # os.rename(DB_PATH, DB_PATH + ".backup")
+    #   db = np.load(DB_PATH) # Load from the temporary location
+    db = np.load(DB_PATH) # Load from the temporary location
 
     known_embeddings = db["embeddings"] # shape (N,512)
     known_labels = db["labels"] # shape (N,)
     # load models
     known_norm = l2norm(known_embeddings)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    mtcnn = MTCNN(image_size=160, margin=20, keep_all=True, device=device)
+    print(device, "device")
+    # mtcnn = MTCNN(image_size=160, margin=20, keep_all=True, device=device)
+    mtcnn = MTCNN(
+        image_size=160, 
+        margin=20, 
+        keep_all=False,       # Only look for the primary face
+        min_face_size=80,     # Ignore faces smaller than 80x80 pixels
+        thresholds=[0.6, 0.7, 0.7], # Speed up P-Net stage
+        factor=0.709, 
+        post_process=True, 
+        device=device
+    )
     resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
     log("done loading new file")
   except Exception as e:
@@ -443,11 +491,12 @@ def addFaceToList(val):
   updateHtmlData()
   log("faceName set to " + val)
 
-
 # endregion
 faceName = None
+frame_count=0
 avgs: Dict[str, RecentAverage] = {}
 updateFacesList()
+boxes=None
 prev_time: float = time.time()
 while True:
   if not cap or not cap.isOpened():
@@ -461,7 +510,7 @@ while True:
   if not ret:
     log(frame, ret)
     continue
-  frame = cv2.flip(frame, 1) # Flip the frame for a mirror effect
+  frame = cv2.flip(frame, 0) # Flip the frame for a mirror effect
   frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
   rawframe_bgr = frame.copy()
   facePos = None
@@ -477,7 +526,19 @@ while True:
   # endregion
   if mtcnn:
     foundUnknownFace = False
-    boxes, probs = mtcnn.detect(frame_rgb)
+    frame_count += 1
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # ONLY RUN MTCNN EVERY 5th FRAME
+    if frame_count % 2 == 0:
+        # Resize for detection ONLY (HUGE SPEEDUP)
+        small_frame = cv2.resize(frame_rgb, (320, 180)) 
+        boxes, probs = mtcnn.detect(small_frame)
+        
+        # Scale boxes back to 1280x720
+        if boxes is not None:
+            boxes = boxes * [1280/320, 720/180, 1280/320, 720/180]
+    # boxes, probs = mtcnn.detect(frame_rgb)
     if boxes is not None:
       for box, prob in zip(boxes, probs):
         # region what face is that
@@ -650,4 +711,6 @@ while True:
           2,
           cv2.LINE_AA,
         )
+      
+      
   send_frame(frame)

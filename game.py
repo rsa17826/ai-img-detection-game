@@ -16,9 +16,64 @@ from facenet_pytorch import MTCNN, InceptionResnetV1 # type: ignore
 import numpy as np
 from pathlib import Path
 import pyttsx3 # type: ignore
-
-
 # endregion
+# wget https://github.com/pytorch/vision/archive/refs/tags/v0.17.2.zip
+# unzip v0.17.2.zip
+# cd vision-0.17.2
+# python setup.py install
+# 
+
+# pip install --no-cache-dir \
+# torch==2.8.0 torchvision==0.23.0 \
+# --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+# pip install facenet-pytorch --no-deps
+
+# cd ~/ai-img-detection-game
+# git clone https://github.com/opencv/opencv.git
+# git clone https://github.com/opencv/opencv_contrib.git
+# cd opencv
+# git checkout 4.9.0   # or the latest stable
+# cd ../opencv_contrib
+# git checkout 4.9.0
+
+
+# cd ~/ai-img-detection-game/opencv
+# mkdir build
+# cd build
+
+# davidbabel.clever
+# jeff-hykin.mario
+# MurlocCra4ler.bettersearch
+
+# pip uninstall -y numpy
+# pip install "numpy<2"
+
+# pip install torch==2.8.0 torchvision==0.23.0 --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+# cmake -D CMAKE_BUILD_TYPE=Release \
+# -D CMAKE_INSTALL_PREFIX=$HOME/.venv \
+# -D PYTHON3_EXECUTABLE=$HOME/.venv/bin/python \
+# -D PYTHON3_INCLUDE_DIR=$HOME/.venv/include/python3.10 \
+# -D PYTHON3_PACKAGES_PATH=$HOME/.venv/lib/python3.10/site-packages \
+# -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
+# -D BUILD_opencv_python3=ON \
+# -D WITH_GSTREAMER=ON \
+# -D WITH_V4L=ON \
+# -D WITH_CUDA=ON \
+# -D ENABLE_NEON=ON \
+# -D WITH_QT=OFF \
+# -D BUILD_TESTS=OFF \
+# -D BUILD_EXAMPLES=OFF ..
+# 
+print("Torch:", torch.__version__)
+print("CUDA available:", torch.cuda.is_available())
+print("Torch CUDA:", torch.version.cuda)
+print("Device count:", torch.cuda.device_count())
+if torch.cuda.is_available():
+  print("Device:", torch.cuda.get_device_name(0))
+
+
 # region start
 # normalize known vectors for cosine sim
 def l2norm(x):
@@ -212,15 +267,44 @@ def requestUpdatedData():
   )
 
 
+def gstreamer_pipeline(sensor_id=0, width=640, height=480, framerate=30, flip_method=0):
+    return (
+        f"nvarguscamerasrc sensor-id={sensor_id} ! "
+        f"video/x-raw(memory:NVMM), width={width}, height={height}, framerate={framerate}/1 ! "
+        f"nvvidconv flip-method={flip_method} ! "
+        # We target BGRx directly and let videoconvert do the final step 
+        # with a small queue to prevent blocking
+        f"video/x-raw, format=BGRx ! "
+        f"videoconvert ! "
+        f"video/x-raw, format=BGR ! "
+        f"appsink drop=True max-buffers=1"
+    )
+    # sudo sh -c 'echo "/usr/lib/aarch64-linux-gnu/tegra-egl" > /etc/ld.so.conf.d/nvidia-tegra-egl.conf && ldconfig'   
+
 # Expose a function to start capturing video from the specified camera
 @eel.expose
 def startCapture(idx):
   global cap, capidx
   stopCapture()
-  idx = int(idx) # Convert the input index to an integer
-  log(f"Attempting to start capture on camera index: {idx}")
-  capidx = idx # Set the camera index to the global variable
-  cap = cv2.VideoCapture(idx) # Initialize the VideoCapture object
+  # pipeline = (
+  #   "nvarguscamerasrc sensor-id=0 ! "
+  #   "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1,format=NV12 ! "
+  #   "nvvidconv ! "
+  #   "video/x-raw,format=BGRx ! "
+  #   "videoconvert ! "
+  #   "video/x-raw,format=BGR ! "
+  #   "appsink drop=1 sync=false"
+  # )
+
+  # cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+  pipeline = gstreamer_pipeline(sensor_id=0, framerate=30)
+  cap = cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)
+
+
+  # idx = int(idx) # Convert the input index to an integer
+  # log(f"Attempting to start capture on camera index: {idx}")
+  # capidx = idx # Set the camera index to the global variable
+  # cap = cv2.VideoCapture(idx) # Initialize the VideoCapture object
   if not cap.isOpened():
     log(
       f"Failed to open camera with index {idx}. Please check the index and try again."
@@ -291,7 +375,7 @@ Thread(
     mode=None, port=15674, close_callback=lambda *x: os._exit(0), shutdown_delay=10
   )
 ).start()
-os.system("start http://127.0.0.1:15674/gameWeb.html")
+os.system("xdg-open http://127.0.0.1:15674/gameWeb.html")
 
 
 # Function to format numbers into a specific format
@@ -387,24 +471,31 @@ def updateFacesList():
   try:
     # enroll_faces.init(log, eel.setProg)
     log("started loading new file")
-    if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
-      os.rename(DB_PATH + ".backup", DB_PATH)
-    with tempfile.NamedTemporaryFile(delete=False) as temp_db:
-      log(temp_db.name)
-      f.write(temp_db.name, f.read(DB_PATH, "", True), True)
-      if os.path.exists(DB_PATH + ".backup"):
-        os.remove(DB_PATH + ".backup")
-      os.rename(DB_PATH, DB_PATH + ".backup")
-      db = np.load(temp_db.name) # Load from the temporary location
+    # if not os.path.exists(DB_PATH) and os.path.exists(DB_PATH + ".backup"):
+    #   os.rename(DB_PATH + ".backup", DB_PATH)
+    # with tempfile.NamedTemporaryFile(delete=False) as temp_db:
+    #   log(temp_db.name)
+    #   # f.write(temp_db.name, f.read(DB_PATH, "", True), True)
+    #   # if os.path.exists(DB_PATH + ".backup"):
+    #   #   os.remove(DB_PATH + ".backup")
+    #   # os.rename(DB_PATH, DB_PATH + ".backup")
+    db = np.load(DB_PATH) # Load from the temporary location
 
     known_embeddings = db["embeddings"] # shape (N,512)
     known_labels = db["labels"] # shape (N,)
     # load models
     known_norm = l2norm(known_embeddings)
+    print(torch.cuda.is_available(), "torch.cuda.is_available()")
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     mtcnn = MTCNN(image_size=160, margin=20, keep_all=True, device=device)
     resnet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
     log("done loading new file")
+    import gc
+
+    # After loading the model
+    gc.collect()
+    torch.cuda.empty_cache()
+    torch.cuda.ipc_collect()
   except Exception as e:
     log(e)
   eel.hideProg()
@@ -436,9 +527,36 @@ def say(msg):
   log(msg)
   Thread(target=_say).start()
 
+def get_embeddings_batched(face_crops):
+    """
+    Processes all detected faces in a single GPU pass.
+    face_crops: List of RGB numpy arrays
+    """
+    if not face_crops:
+        return []
+
+    # 1. Pre-process all crops (Resize & Normalize)
+    tensors = []
+    for crop in face_crops:
+        # Resize to MTCNN expected size (160x160)
+        img = cv2.resize(crop, (160, 160))
+        # Convert to tensor and normalize (standard for InceptionResnetV1)
+        img = (torch.tensor(img).permute(2, 0, 1).float() - 127.5) / 128.0
+        tensors.append(img)
+    
+    # Create a batch: shape (N, 3, 160, 160)
+    batch = torch.stack(tensors).to(device)
+
+    with torch.no_grad():
+        # RUN INFERENCE ONCE for all faces
+        embs = resnet(batch)
+    
+    return embs.cpu().numpy()
+
+# --- Inside your While True loop ---
+
 
 # endregion
-
 highScoreOwner = f.read("./highScorename.txt", "")
 faceName = None
 updateFacesList()
@@ -448,11 +566,11 @@ shouldSayNewHighScores: Any = {}
 spawnCount = 0.0
 lastActiveTimes: Any = {}
 while True:
-  if os.path.exists("data/embeddings_db.npz"):
-    try:
-      updateFacesList()
-    except Exception as e:
-      log(e)
+  # if os.path.exists("data/embeddings_db.npz"):
+  #   try:
+  #     updateFacesList()
+  #   except Exception as e:
+  #     log(e)
   if not cap or not cap.isOpened():
     sendBlankFrame()
     continue
@@ -464,10 +582,11 @@ while True:
   ret, frame = cap.read()
   if not ret:
     log(frame, ret)
+    time.sleep(1)
     continue
   # endregion
   # region grab frame
-  frame = cv2.flip(frame, 1) # Flip the frame for a mirror effect
+  frame = cv2.flip(frame, 0) # Flip the frame for a mirror effect
   frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
   # endregion
   facePos = None
@@ -542,205 +661,210 @@ while True:
   ]
   # endregion
   if mtcnn:
-    # region get all faces
+    # 1. Detect all faces at once
     boxes, probs = mtcnn.detect(frame_rgb)
-    # endregion
+    
     if boxes is not None:
+      face_crops = []
+      valid_boxes = []
+      
+      # 2. Extract crops without re-running MTCNN
       for box, prob in zip(boxes, probs):
-        # region what face is that
-        if prob is None:
-          continue
-        x1, y1, x2, y2 = [int(v) for v in box]
-        face_crop_rgb = frame_rgb[y1:y2, x1:x2]
-        if face_crop_rgb.size == 0:
-          continue
-        emb = None
-        try:
-          emb = get_embedding(face_crop_rgb)
-        except Exception as e:
-          continue
-        if emb is None:
-          continue
-        try:
-          name, score = match_identity(emb)
-        except Exception as e:
-          log(e)
-          continue
-        # endregion
-        if name:
-          if name not in lastActiveTimes:
-            say(name + " just started the game")
-          lastActiveTimes[name] = curr_time
-          label_text = f"{name} ({score:.2f})"
-          color = (0, 255, 0) # green
-          facePos = [x1, y1, x2, y2]
-          collision = False
-          graze: float = 0
-          grazeSize = 5
-          # region check collisions
-          for x, y, w, h, dir, speed in deathBoxList:
-            x = int(x)
-            y = int(y)
-            w = int(w)
-            h = int(h)
-            if collides(x, y, w, h, facePos):
-              if (
-                (
-                  name not in shouldSayNewHighScores
-                  or not shouldSayNewHighScores[name]
-                )
-                and highScoreOwner == name
-                and highScore == gameScores[name]
-              ):
-                say(
-                  name
-                  + " just lost with a new highscore of "
-                  + str(int(highScore))
-                )
-              gameScores[name] = 0
-              shouldSayNewHighScores[name] = True
-              collision = True
-              break
-            elif collides(
-              x - grazeSize,
-              y - grazeSize,
-              w + (grazeSize - 2),
-              h + (grazeSize * 2),
-              facePos,
-            ):
-              graze = 2
-            elif collides(
-              x - (grazeSize * 2),
-              y - (grazeSize * 2),
-              w + (grazeSize * 4),
-              h + (grazeSize * 4),
-              facePos,
-            ):
-              graze = 0.3
-          # endregion
-          # region calc new score
-          if not collision:
-            if name not in gameScores:
-              gameScores[name] = 0
-            gameScores[name] += ((facePos[3] / 3) * delta) * (graze + 1)
-          # endregion
-          # region draw face box
-          color = (0, 255, 0)
-          if collision:
-            color = (0, 0, 255)
-          elif graze == 0.3:
-            color = (0, 192, 255)
-          elif graze == 2:
-            color = (0, 128, 255)
-          cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            color,
-            2,
-          )
-          cv2.putText(
-            frame,
-            name + ": " + toPlaces(score, 1, 2),
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.6,
-            color,
-            2,
-          )
-          # endregion
-          # region render score text
-          textSize = 0.6
-          hasHighScore = name == highScoreOwner
-          gettingHighScore = hasHighScore and gameScores[name] >= highScore
-          textColor = (255, 255, 255)
-          if gettingHighScore or hasHighScore:
-            textSize = 0.8
-          if gettingHighScore:
-            textColor = (192, 0, 255)
-          elif hasHighScore:
-            textColor = (255, 192, 0)
-          # Draw border (black) in 4 directions
-          cv2.putText(
-            frame,
-            str(int(gameScores[name])),
-            (x1 - 1, y1 - 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            textSize,
-            (0, 0, 0),
-            4,
-            cv2.LINE_AA,
-          )
-          cv2.putText(
-            frame,
-            str(int(gameScores[name])),
-            (x1 + 1, y1 - 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            textSize,
-            (0, 0, 0),
-            4,
-            cv2.LINE_AA,
-          )
-          cv2.putText(
-            frame,
-            str(int(gameScores[name])),
-            (x1, y1 - 31),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            textSize,
-            (0, 0, 0),
-            4,
-            cv2.LINE_AA,
-          )
-          cv2.putText(
-            frame,
-            str(int(gameScores[name])),
-            (x1, y1 - 29),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            textSize,
-            (0, 0, 0),
-            4,
-            cv2.LINE_AA,
-          )
+        if prob is None or prob < 0.9: continue # Filter low confidence
+        x1, y1, x2, y2 = [max(0, int(v)) for v in box]
+        crop = frame_rgb[y1:y2, x1:x2]
+        if crop.size > 0:
+          face_crops.append(crop)
+          valid_boxes.append((x1, y1, x2, y2))
 
-          # Draw main text on top
-          cv2.putText(
-            frame,
-            str(int(gameScores[name])),
-            (x1, y1 - 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            textSize,
-            textColor,
-            2,
-            cv2.LINE_AA,
-          )
+      # 3. Get all embeddings in ONE batch
+      if face_crops:
+        all_embs = get_embeddings_batched(face_crops)
+        
+        # 4. Match identities
+        for i, emb in enumerate(all_embs):
+          try:
+            name, score = match_identity(emb)
+          except Exception as e:
+            log(e)
+            continue
+          x1, y1, x2, y2 = valid_boxes[i]
           # endregion
-        # region update scores and highscores
-        for scorereName, gameScore in gameScores.items():
-          if int(gameScore) > highScore:
-            highScore = gameScore
-            if highScoreOwner:
-              if scorereName != highScoreOwner:
-                say(
-                  scorereName
-                  + " overtook "
-                  + highScoreOwner
-                  + " with a score of "
-                  + str(int(gameScore))
-                )
-              else:
+          if name:
+            if name not in lastActiveTimes:
+              say(name + " just started the game")
+            lastActiveTimes[name] = curr_time
+            label_text = f"{name} ({score:.2f})"
+            color = (0, 255, 0) # green
+            facePos = [x1, y1, x2, y2]
+            collision = False
+            graze: float = 0
+            grazeSize = 5
+            # region check collisions
+            for x, y, w, h, dir, speed in deathBoxList:
+              x = int(x)
+              y = int(y)
+              w = int(w)
+              h = int(h)
+              if collides(x, y, w, h, facePos):
                 if (
-                  scorereName in shouldSayNewHighScores
-                  and shouldSayNewHighScores[scorereName]
+                  (
+                    name not in shouldSayNewHighScores
+                    or not shouldSayNewHighScores[name]
+                  )
+                  and highScoreOwner == name
+                  and name in gameScores
+                  and highScore == gameScores[name]
                 ):
                   say(
+                    name
+                    + " just lost with a new highscore of "
+                    + str(int(highScore))
+                  )
+                gameScores[name] = 0
+                shouldSayNewHighScores[name] = True
+                collision = True
+                break
+              elif collides(
+                x - grazeSize,
+                y - grazeSize,
+                w + (grazeSize - 2),
+                h + (grazeSize * 2),
+                facePos,
+              ):
+                graze = 2
+              elif collides(
+                x - (grazeSize * 2),
+                y - (grazeSize * 2),
+                w + (grazeSize * 4),
+                h + (grazeSize * 4),
+                facePos,
+              ):
+                graze = 0.3
+            # endregion
+            # region calc new score
+            if not collision:
+              if name not in gameScores:
+                gameScores[name] = 0
+              gameScores[name] += ((facePos[3] / 3) * delta) * (graze + 1)
+            # endregion
+            # region draw face box
+            color = (0, 255, 0)
+            if collision:
+              color = (0, 0, 255)
+            elif graze == 0.3:
+              color = (0, 192, 255)
+            elif graze == 2:
+              color = (0, 128, 255)
+            cv2.rectangle(
+              frame,
+              (x1, y1),
+              (x2, y2),
+              color,
+              2,
+            )
+            cv2.putText(
+              frame,
+              name + ": " + toPlaces(score, 1, 2),
+              (x1, y1 - 10),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              0.6,
+              color,
+              2,
+            )
+            # endregion
+            # region render score text
+            textSize = 0.6
+            hasHighScore = name == highScoreOwner
+            gettingHighScore = hasHighScore and gameScores[name] >= highScore
+            textColor = (255, 255, 255)
+            if gettingHighScore or hasHighScore:
+              textSize = 0.8
+            if gettingHighScore:
+              textColor = (192, 0, 255)
+            elif hasHighScore:
+              textColor = (255, 192, 0)
+            # Draw border (black) in 4 directions
+            cv2.putText(
+              frame,
+              str(int(gameScores[name])),
+              (x1 - 1, y1 - 30),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              textSize,
+              (0, 0, 0),
+              4,
+              cv2.LINE_AA,
+            )
+            cv2.putText(
+              frame,
+              str(int(gameScores[name])),
+              (x1 + 1, y1 - 30),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              textSize,
+              (0, 0, 0),
+              4,
+              cv2.LINE_AA,
+            )
+            cv2.putText(
+              frame,
+              str(int(gameScores[name])),
+              (x1, y1 - 31),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              textSize,
+              (0, 0, 0),
+              4,
+              cv2.LINE_AA,
+            )
+            cv2.putText(
+              frame,
+              str(int(gameScores[name])),
+              (x1, y1 - 29),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              textSize,
+              (0, 0, 0),
+              4,
+              cv2.LINE_AA,
+            )
+
+            # Draw main text on top
+            cv2.putText(
+              frame,
+              str(int(gameScores[name])),
+              (x1, y1 - 30),
+              cv2.FONT_HERSHEY_SIMPLEX,
+              textSize,
+              textColor,
+              2,
+              cv2.LINE_AA,
+            )
+            # endregion
+          # region update scores and highscores
+          for scorereName, gameScore in gameScores.items():
+            if int(gameScore) > highScore:
+              highScore = gameScore
+              if highScoreOwner:
+                if scorereName != highScoreOwner:
+                  say(
                     scorereName
-                    + " got a new high score of "
+                    + " overtook "
+                    + highScoreOwner
+                    + " with a score of "
                     + str(int(gameScore))
                   )
-                  shouldSayNewHighScores[scorereName] = False
-            highScoreOwner = str(scorereName)
-            f.write("./highScore.txt", str(int(gameScore)))
-            f.write("./highScorename.txt", str(scorereName))
+                else:
+                  if (
+                    scorereName in shouldSayNewHighScores
+                    and shouldSayNewHighScores[scorereName]
+                  ):
+                    say(
+                      scorereName
+                      + " got a new high score of "
+                      + str(int(gameScore))
+                    )
+                    shouldSayNewHighScores[scorereName] = False
+              highScoreOwner = str(scorereName)
+              f.write("./highScore.txt", str(int(gameScore)))
+              f.write("./highScorename.txt", str(scorereName))
         # endregion
   for name, t in lastActiveTimes.copy().items():
     if curr_time - t > 1:
