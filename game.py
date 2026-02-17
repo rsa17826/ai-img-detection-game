@@ -525,28 +525,28 @@ import threading
 last_detected_faces = [] 
 ai_is_busy = False
 
-def run_ai_inference(frame_rgb):
-    global last_detected_faces, ai_is_busy
-    try:
-        boxes, probs = mtcnn.detect(frame_rgb)
-        if boxes is not None:
-            face_crops = []
-            valid_boxes = []
-            for box, prob in zip(boxes, probs):
-                if prob is None or prob < 0.9: continue
-                x1, y1, x2, y2 = [max(0, int(v)) for v in box]
-                face_crops.append(frame_rgb[y1:y2, x1:x2])
-                valid_boxes.append((x1, y1, x2, y2))
+# def run_ai_inference(frame_rgb):
+#     global last_detected_faces, ai_is_busy
+#     try:
+#         boxes, probs = mtcnn.detect(frame_rgb)
+#         if boxes is not None:
+#             face_crops = []
+#             valid_boxes = []
+#             for box, prob in zip(boxes, probs):
+#                 if prob is None or prob < 0.9: continue
+#                 x1, y1, x2, y2 = [max(0, int(v)) for v in box]
+#                 face_crops.append(frame_rgb[y1:y2, x1:x2])
+#                 valid_boxes.append((x1, y1, x2, y2))
             
-            if face_crops:
-                embeddings = get_embeddings_batched(face_crops)
-                results = []
-                for i, emb in enumerate(embeddings):
-                    name, score = match_identity(emb)
-                    results.append({"name": name, "score": score, "box": valid_boxes[i]})
-                last_detected_faces = results # Update global state
-    finally:
-        ai_is_busy = False # Unlock so the next frame can be processed
+#             if face_crops:
+#                 embeddings = get_embeddings_batched(face_crops)
+#                 results = []
+#                 for i, emb in enumerate(embeddings):
+#                     name, score = match_identity(emb)
+#                     results.append({"name": name, "score": score, "box": valid_boxes[i]})
+#                 last_detected_faces = results # Update global state
+#     finally:
+#         ai_is_busy = False # Unlock so the next frame can be processed
 
 
 def comstr(item: Any) -> str:

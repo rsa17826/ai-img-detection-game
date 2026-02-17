@@ -17,3 +17,5 @@ sudo systemctl disable nvargus-daemon
 sudo rm /tmp/argus_socket
 sudo systemctl enable nvargus-daemon
 sudo systemctl start nvargus-daemon
+
+sudo sync; echo 3 | sudo tee /proc/sys/vm/drop_caches

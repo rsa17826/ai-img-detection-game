@@ -490,6 +490,64 @@ def addFaceToList(val):
   enableAutoCapture=True
   updateHtmlData()
   log("faceName set to " + val)
+last_detected_faces=[]
+def get_embeddings_batched(face_crops):
+    """
+    Processes all detected faces in a single GPU pass.
+    face_crops: List of RGB numpy arrays
+    """
+    if not face_crops:
+        return []
+
+    # 1. Pre-process all crops (Resize & Normalize)
+    tensors = []
+    for crop in face_crops:
+        # Resize to MTCNN expected size (160x160)
+        img = cv2.resize(crop, (160, 160))
+        # Convert to tensor and normalize (standard for InceptionResnetV1)
+        img = (torch.tensor(img).permute(2, 0, 1).float() - 127.5) / 128.0
+        tensors.append(img)
+    
+    # Create a batch: shape (N, 3, 160, 160)
+    batch = torch.stack(tensors).to(device)
+
+    with torch.no_grad():
+        # RUN INFERENCE ONCE for all faces
+        embs = resnet(batch)
+    
+    return embs.cpu().numpy()
+
+
+def run_ai_inference(frame_rgb_small, scale_w, scale_h):
+    global last_detected_faces, ai_is_busy
+    try:
+        boxes, probs = mtcnn.detect(frame_rgb_small)
+        results = []
+        if boxes is not None:
+            face_crops = []
+            valid_boxes = []
+            for box, prob in zip(boxes, probs):
+                if prob is None or prob < 0.9: continue
+                # Scale coordinates back to original frame size
+                x1, y1, x2, y2 = [int(box[0] * scale_w), int(box[1] * scale_h), 
+                                  int(box[2] * scale_w), int(box[3] * scale_h)]
+                
+                # Clip coordinates to avoid array errors
+                crop = frame_rgb_small[max(0, int(box[1])):int(box[3]), max(0, int(box[0])):int(box[2])]
+                if crop.size > 0:
+                    face_crops.append(crop)
+                    valid_boxes.append((x1, y1, x2, y2))
+
+            if face_crops:
+                embeddings = get_embeddings_batched(face_crops)
+                for i, emb in enumerate(embeddings):
+                    name, score = match_identity(emb)
+                    results.append({"name": name, "score": score, "box": valid_boxes[i]})
+        
+        last_detected_faces = results
+    finally:
+        ai_is_busy = False
+
 
 # endregion
 faceName = None
@@ -514,6 +572,14 @@ while True:
   frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
   rawframe_bgr = frame.copy()
   facePos = None
+  # if not ai_is_busy:
+  # ai_is_busy = True
+  # Speed hack: Detect on a tiny image
+  height, width = frame.shape[:2]
+  ai_w, ai_h = 320, 240
+  small_for_ai = cv2.resize(frame_rgb, (ai_w, ai_h))
+  run_ai_inference(small_for_ai, width/ai_w, height/ai_h)
+
   cv2.putText(
     frame,
     "FPS: " + toPlaces(fps, 2, 3),
@@ -524,193 +590,169 @@ while True:
     2,
   )
   # endregion
-  if mtcnn:
-    foundUnknownFace = False
-    frame_count += 1
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+  foundUnknownFace = False
+  frame_count += 1
+  frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    # ONLY RUN MTCNN EVERY 5th FRAME
-    if frame_count % 2 == 0:
-        # Resize for detection ONLY (HUGE SPEEDUP)
-        small_frame = cv2.resize(frame_rgb, (320, 180)) 
-        boxes, probs = mtcnn.detect(small_frame)
-        
-        # Scale boxes back to 640x480
-        if boxes is not None:
-            boxes = boxes * [640/320, 480/180, 640/320, 480/180]
-    # boxes, probs = mtcnn.detect(frame_rgb)
-    if boxes is not None:
-      for box, prob in zip(boxes, probs):
-        # region what face is that
-        if prob is None:
-          continue
-        x1, y1, x2, y2 = [int(v) for v in box]
-        face_crop_rgb = frame_rgb[y1:y2, x1:x2]
-        if face_crop_rgb.size == 0:
-          continue
-        emb = None
-        try:
-          emb = get_embedding(face_crop_rgb)
-        except Exception as e:
-          continue
-        if emb is None:
-          continue
-        try:
-          name, score = match_identity(emb)
-        except Exception as e:
-          log(e)
-          continue
-        # endregion
-        # region draw face box and name
-        label_text = "Unknown"
-        color = (0, 0, 255) # red in BGR
-        if name is not None:
-          label_text = f"{name}:"
-          color = (0, 255, 0) # green
-        else:
-          foundUnknownFace = True
-        facePos = [x1, y1, x2, y2]
-        # if name:
-        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-        # endregion
-        # region capture face
-        if (
-          faceName
-          and foundUnknownFace
-          and not name
-          and faceName not in known_labels
-        ):
-          enableAutoCapture = True
-          updateHtmlData()
-        if (
-          (
-            enableAutoCapture
-            and name
-            and score
-            and score < TARGET_CONFIDENCE
-            and score > MATCH_THRESHOLD
-          )
-          or (
-            faceName
-            and foundUnknownFace
-            and not name
-            and faceName not in known_labels
-          )
-          or (faceName and name and faceName == name)
-        ):
-          send_frame(frame)
-          if not name:
-            name = faceName
-          i = 0
-          path = f"./players/{name}/{i}.png"
-          os.makedirs(f"./players/{name}", exist_ok=True)
-          while os.path.exists(path):
-            i += 1
-            path = f"./players/{name}/{i}.png"
-          log("adding image for ", name, "idx: ", i)
-          if facePos:
-            frame_rgb_cropped = rawframe_bgr[
-              max(0, facePos[1] - 15) : min(
-                facePos[3] + 15, rawframe_bgr.shape[0]
-              ),
-              max(0, facePos[0] - 15) : min(
-                facePos[2] + 15, rawframe_bgr.shape[1]
-              ),
-            ]
-          else:
-            frame_rgb_cropped = rawframe_bgr
+  # boxes, probs = mtcnn.detect(frame_rgb)
+  for face in last_detected_faces:
+    name = face["name"]
+    score = face["score"]
 
-          cv2.imwrite(
-            path, frame_rgb_cropped
-          ) # Save the current frame as an image
-          faceName = None
-          updateFacesList()
-        # endregion
-        if score and name:
-          if name not in avgs:
-            avgs[name] = RecentAverage()
-          avgs[name].registerValue(score)
-        if foundUnknownFace:
-          break
-        if name:
-          if len(avgs[name].values) < 10:
-            color = (0, 0, 255)
-            label_text += (
-              " move your face around and show different angles "
-              + str(len(avgs[name].values))
-              + "/10"
-            )
-          elif avgs[name].getAverage() < 0.8:
-            color = (0, 0, 255)
-            label_text += (
-              " get avg > .8 AVG: "
-              + toPlaces(avgs[name].getAverage(), 1, 2)
-              + " - CURRENT: "
-              + toPlaces(score, 1, 2)
-            )
-          else:
-            color = (0, 255, 0)
-            label_text += (
-              " ready to play ~"
-              + toPlaces(avgs[name].getAverage() * 100, 3, 0)
-              + "% detection rate"
-              + " - CURRENT: "
-              + toPlaces(score, 1, 2)
-            )
-            enableAutoCapture = False
-        updateHtmlData()
-        textSize = 0.55
-        cv2.putText(
-          frame,
-          label_text,
-          (5 - 1, y1 - 10),
-          cv2.FONT_HERSHEY_SIMPLEX,
-          textSize,
-          (0, 0, 0),
-          4,
-          cv2.LINE_AA,
-        )
-        cv2.putText(
-          frame,
-          label_text,
-          (5 + 1, y1 - 10),
-          cv2.FONT_HERSHEY_SIMPLEX,
-          textSize,
-          (0, 0, 0),
-          4,
-          cv2.LINE_AA,
-        )
-        cv2.putText(
-          frame,
-          label_text,
-          (5, y1 - 11),
-          cv2.FONT_HERSHEY_SIMPLEX,
-          textSize,
-          (0, 0, 0),
-          4,
-          cv2.LINE_AA,
-        )
-        cv2.putText(
-          frame,
-          label_text,
-          (5, y1 - 9),
-          cv2.FONT_HERSHEY_SIMPLEX,
-          textSize,
-          (0, 0, 0),
-          4,
-          cv2.LINE_AA,
-        )
+    x1, y1, x2, y2 = [int(v) for v in face["box"]]
+    face_crop_rgb = frame_rgb[y1:y2, x1:x2]
+    if face_crop_rgb.size == 0:
+      continue
+    # region draw face box and name
+    label_text = "Unknown"
+    color = (0, 0, 255) # red in BGR
+    if name is not None:
+      label_text = f"{name}:"
+      color = (0, 255, 0) # green
+    else:
+      foundUnknownFace = True
+    facePos = [x1, y1, x2, y2]
+    # if name:
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+    # endregion
+    # region capture face
+    if (
+      faceName
+      and foundUnknownFace
+      and not name
+      and faceName not in known_labels
+    ):
+      enableAutoCapture = True
+      updateHtmlData()
+    if (
+      (
+        enableAutoCapture
+        and name
+        and score
+        and score < TARGET_CONFIDENCE
+        and score > MATCH_THRESHOLD
+      )
+      or (
+        faceName
+        and foundUnknownFace
+        and not name
+        and faceName not in known_labels
+      )
+      or (faceName and name and faceName == name)
+    ):
+      send_frame(frame)
+      if not name:
+        name = faceName
+      i = 0
+      path = f"./players/{name}/{i}.png"
+      os.makedirs(f"./players/{name}", exist_ok=True)
+      while os.path.exists(path):
+        i += 1
+        path = f"./players/{name}/{i}.png"
+      log("adding image for ", name, "idx: ", i)
+      if facePos:
+        frame_rgb_cropped = rawframe_bgr[
+          max(0, facePos[1] - 15) : min(
+            facePos[3] + 15, rawframe_bgr.shape[0]
+          ),
+          max(0, facePos[0] - 15) : min(
+            facePos[2] + 15, rawframe_bgr.shape[1]
+          ),
+        ]
+      else:
+        frame_rgb_cropped = rawframe_bgr
 
-        cv2.putText(
-          frame,
-          label_text,
-          (5, y1 - 10),
-          cv2.FONT_HERSHEY_SIMPLEX,
-          textSize,
-          color,
-          2,
-          cv2.LINE_AA,
+      cv2.imwrite(
+        path, frame_rgb_cropped
+      ) # Save the current frame as an image
+      faceName = None
+      updateFacesList()
+    # endregion
+    if score and name:
+      if name not in avgs:
+        avgs[name] = RecentAverage()
+      avgs[name].registerValue(score)
+    if foundUnknownFace:
+      break
+    if name:
+      if len(avgs[name].values) < 10:
+        color = (0, 0, 255)
+        label_text += (
+          " move your face around and show different angles "
+          + str(len(avgs[name].values))
+          + "/10"
         )
-      
+      elif avgs[name].getAverage() < 0.8:
+        color = (0, 0, 255)
+        label_text += (
+          " get avg > .8 AVG: "
+          + toPlaces(avgs[name].getAverage(), 1, 2)
+          + " - CURRENT: "
+          + toPlaces(score, 1, 2)
+        )
+      else:
+        color = (0, 255, 0)
+        label_text += (
+          " ready to play ~"
+          + toPlaces(avgs[name].getAverage() * 100, 3, 0)
+          + "% detection rate"
+          + " - CURRENT: "
+          + toPlaces(score, 1, 2)
+        )
+        enableAutoCapture = False
+    updateHtmlData()
+    textSize = 0.55
+    cv2.putText(
+      frame,
+      label_text,
+      (5 - 1, y1 - 10),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      textSize,
+      (0, 0, 0),
+      4,
+      cv2.LINE_AA,
+    )
+    cv2.putText(
+      frame,
+      label_text,
+      (5 + 1, y1 - 10),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      textSize,
+      (0, 0, 0),
+      4,
+      cv2.LINE_AA,
+    )
+    cv2.putText(
+      frame,
+      label_text,
+      (5, y1 - 11),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      textSize,
+      (0, 0, 0),
+      4,
+      cv2.LINE_AA,
+    )
+    cv2.putText(
+      frame,
+      label_text,
+      (5, y1 - 9),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      textSize,
+      (0, 0, 0),
+      4,
+      cv2.LINE_AA,
+    )
+
+    cv2.putText(
+      frame,
+      label_text,
+      (5, y1 - 10),
+      cv2.FONT_HERSHEY_SIMPLEX,
+      textSize,
+      color,
+      2,
+      cv2.LINE_AA,
+    )
+    
       
   send_frame(frame)
